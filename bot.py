@@ -3,7 +3,14 @@ import subprocess
 import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import ollama
+from openai import OpenAI
+import json
+
+# Initialize the client pointing to OmniRoute
+client = OpenAI(
+    base_url="http://localhost:20128/v1",
+    api_key="sk-no-key-required"
+)
 
 TELEGRAM_BOT_TOKEN = "***REDACTED_TELEGRAM_TOKEN***"
 
@@ -85,19 +92,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     try:
-        # Switching to llama3.2 (2GB) which is MUCH faster than llama3.1 (5GB)
-        print("Thinking (using fast llama3.2 model)...")
-        response = ollama.chat(
-            model='llama3.2',
+        print("Thinking (using Claude via OmniRoute)...")
+        # Use Claude model
+        response = client.chat.completions.create(
+            model='auto', # using auto as per omniroute configuration
             messages=messages,
             tools=tools_schema
         )
         
+        response_message = response.choices[0].message
+        
         # Check if the LLM decided to use a tool
-        if response.get('message', {}).get('tool_calls'):
-            for tool_call in response['message']['tool_calls']:
-                func_name = tool_call['function']['name']
-                args = tool_call['function']['arguments']
+        if response_message.tool_calls:
+            for tool_call in response_message.tool_calls:
+                func_name = tool_call.function.name
+                args = json.loads(tool_call.function.arguments)
                 
                 if func_name in available_tools:
                     await update.message.reply_text(f"⏳ *Agent action:* Running `{func_name}`...", parse_mode='Markdown')
@@ -106,21 +115,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     tool_result = available_tools[func_name](**args)
                     
                     # Feed the result back to the LLM so it can formulate a final reply
-                    messages.append(response['message'])
+                    # We need to append the assistant's tool call message
+                    messages.append(response_message)
+                    
                     messages.append({
                         'role': 'tool',
+                        'tool_call_id': tool_call.id,
                         'name': func_name,
                         'content': tool_result
                     })
                     
-                    print("Tool executed. Asking Ollama to summarize the result...")
-                    final_response = ollama.chat(model='llama3.2', messages=messages)
-                    reply_text = final_response['message']['content']
+                    print("Tool executed. Asking Claude to summarize the result...")
+                    final_response = client.chat.completions.create(
+                        model='auto',
+                        messages=messages
+                    )
+                    reply_text = final_response.choices[0].message.content
                     await update.message.reply_text(reply_text)
                     return
                     
         # If no tools were called, just return the text response
-        reply_text = response['message']['content']
+        reply_text = response_message.content
         await update.message.reply_text(reply_text)
         
     except Exception as e:
