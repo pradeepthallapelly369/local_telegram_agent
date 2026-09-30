@@ -12,7 +12,13 @@ client = OpenAI(
     api_key="sk-no-key-required"
 )
 
-TELEGRAM_BOT_TOKEN = "***REDACTED_TELEGRAM_TOKEN***"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    raise SystemExit(
+        "ERROR: TELEGRAM_BOT_TOKEN not set.\n"
+        "Set it via: export TELEGRAM_BOT_TOKEN='your-token-here'\n"
+        "Or add it to a .env file in this directory."
+    )
 
 # --- Define Your Tools (Plugins) ---
 
